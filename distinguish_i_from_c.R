@@ -9,6 +9,11 @@ library(Biostrings)
 library(patchwork)
 library(mgcv)
 library(pROC)
+library(ggbeeswarm)
+
+
+theme_set(theme_bw()) # Optional: Set a default theme
+
 
 # load in and process data by serotype
 for (k in 1:3){
@@ -96,6 +101,10 @@ for (k in 1:3){
     mislabeled=df |> filter(classification=='cVDPV' & years>12) |> select(accession)
     df$classification[df$accession %in% mislabeled$accession] = 'wild'
     
+    # https://www.ncbi.nlm.nih.gov/nuccore/JF313098
+    mislabeled=df |> filter(classification=='wild' & years<12) |> select(accession)
+    df$classification[df$accession %in% mislabeled$accession] = 'cVDPV'
+    
     # https://www.ncbi.nlm.nih.gov/nuccore/KC769998
     mislabeled=df |> filter(classification=='VDPV' & d_s>200) |> select(accession)
     df$classification[df$accession %in% mislabeled$accession] = 'wild'
@@ -108,46 +117,45 @@ for (k in 1:3){
   }
 }
 
+
 # organize factor levels
 meta = meta |> 
   filter(classification!='Sabin') |> 
   mutate(serotype=factor(serotype, levels=c('1','2','3'))) |>
   mutate(classification = factor(classification,
-                                 levels=c('SabinLike','VDPV','cVDPV','iVDPV','wild')))
+                                 levels=c('SabinLike','VDPV','iVDPV','cVDPV','wild')))
 
-ggplot(meta) +
-  geom_histogram(aes(x=years,fill=classification),binwidth = 1, boundary=0)
+cmap = c("#04e762","#ae7766","#00a1e4","#dc0073","#f5b700")
+names(cmap)=levels(meta$classification)
 
-ggplot(meta) +
-  geom_point(aes(x=years,y=d_n,color=classification))
+
+## plots
 
 p1=ggplot(meta,aes(x=d_s,y=d_n,color=classification,shape=serotype)) +
-  geom_jitter(width=0.3,height=0.3,alpha=0.2) +
-  theme_bw() +
+  geom_point(alpha=0.2) +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
-  guides(shape=guide_legend('serotype'))
+  scale_color_manual(values=cmap)
 p1
 
-df = meta |> filter(classification %in% c('cVDPV','iVDPV'))
-p2=ggplot(df,aes(x=years,y=d_n,color=classification,fill=classification)) +
-  geom_jitter(aes(shape=serotype),width=0.3,height=0.3,alpha=0.2) +
-  geom_smooth(method='gam') +
-  theme_bw() +
+df = meta |> dplyr::filter(classification %in% c('cVDPV','iVDPV')) |> ungroup() |> droplevels()
+p2=ggplot(df,
+          aes(x=years,y=d_n,color=classification,fill=classification,group = classification)) +
+  geom_point(alpha=0.2) +
+  geom_smooth(method='gam',fill='black',alpha=0.3) +
   ylab('non-synonymous substitutions') +
   xlab('approx. years since OPV') +
   scale_x_continuous(breaks=seq(0,30,by=5)) +
-  guides(shape=guide_legend('serotype'))
+  scale_color_manual(values=cmap)
 p2
 
 p3=ggplot(df,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
-  geom_jitter(aes(shape=as.character(serotype)),width=0.3,height=0.3,alpha=0.2) +
-  geom_smooth(method='gam') +
-  theme_bw() +
+  geom_jitter(aes(shape=serotype),width=0.3,height=0.3,alpha=0.2) +
+  geom_smooth(method='gam',fill='black',alpha=0.3) +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
   scale_x_continuous(breaks=seq(0,300,by=20)) +
-  guides(shape=guide_legend('serotype'))
+  scale_color_manual(values=cmap)
 p3
 
 p2 + p3 + p1
@@ -166,8 +174,18 @@ zhao = zhao |>
   mutate(d_s = d_s - min(d_s))
 
 ggplot() +
-  geom_point(data=df,aes(x=1-nt_diff/903,y=1-d_n/301)) +
-  geom_point(data=zhao,aes(x=1-nt_diff/903,y=1-d_n/301,color=classification)) 
+  geom_point(data=df,   aes(x=100*(1-nt_diff/903), y=1-d_n/301, color=cmap[3])) +
+  geom_point(data=zhao, aes(x=100*(1-nt_diff/903), y=1-d_n/301, color=cmap[4])) +
+  facet_grid(. ~ classification) +
+  xlab("nucleotide identity (%)") +
+  ylab("amino acid identity (%)") +
+  scale_color_identity(
+    name   = "source",
+    breaks = c(cmap[3], cmap[4]),
+    labels = c("Distance from Sabin", "Zhao 2017\ninter-isolate distance"),
+    guide  = "legend"
+  )
+ggsave('supp_Zhoa2017_consistency.png',units='in',width=8, height=3.5)
 
 # checking the dating
 # dates of late iVPDVs tend to be off by a few years, 
@@ -220,35 +238,89 @@ summary(mod4)
 c(AIC(mod3),AIC(mod4))
 plot(mod4)
 
+# years instead of d_s is way worse
+mod5 = gam(formula = classification ~ s(d_n) + s(years),
+           data =df,
+           family='binomial')
+summary(mod5)
+c(AIC(mod3),AIC(mod5))
+plot(mod5)
+
 # mod3=mod1 # wow mod1 is way worse, as one can see looking at the classifier plot p6 below
-df$iVDPVness = predict(mod3,newdata = df,type='response')
+df$cVDPVness = predict(mod3,newdata = df,type='response')
+df$cVDPVness_years = predict(mod5,newdata = df,type='response')
 
 # ROC analysis
-mod3_roc = roc(df$classification,df$iVDPVness)
+mod3_roc = roc(df$classification,df$cVDPVness)
+mod5_roc = roc(df$classification,df$cVDPVness_years)
+
 # best thresholds
   youden = coords(mod3_roc,'best',best.method	= 'youden')
   youden
+  
+  youden_years = coords(mod5_roc,'best',best.method	= 'youden')
+  youden_years
 
-  # weighted = coords(mod3_roc,'best',best.method	= 'youden',best.weights=c(0.1,1e-7))
-  weighted = coords(mod3_roc,'best',best.method	= 'youden',best.weights=c(0.1,0.5))
+  # weighted = coords(mod3_roc,'best',best.method	= 'youden',best.weights=c(10,1e-7))
+  weighted = coords(mod3_roc,'best',best.method	= 'youden',best.weights=c(10,0.5))
   weighted
+  
+  weighted_years = coords(mod5_roc,'best',best.method	= 'youden',best.weights=c(10,0.5))
+  weighted_years
 
-opt_df = data.frame(specificity = c(youden$specificity,weighted$specificity),
-                    sensitivity = c(youden$sensitivity,weighted$sensitivity),
-                    threshold = c(youden$threshold,weighted$threshold),
-                    cost=c('equal','c/i = 10x'))
+opt_df = data.frame(specificity = c(youden$specificity,weighted$specificity,youden_years$specificity,weighted_years$specificity),
+                    sensitivity = c(youden$sensitivity,weighted$sensitivity,youden_years$sensitivity,weighted_years$sensitivity),
+                    threshold = c(youden$threshold,weighted$threshold,youden_years$threshold,weighted_years$threshold),
+                    cost=c('equal','c/i = 10x','equal','c/i = 10x'),
+                    model=c('s(dn) + s(ds)','s(dn) + s(ds)','s(dn) + s(years)','s(dn) + s(years)'))
 p4=ggroc(mod3_roc) + 
-  geom_point(data=opt_df,aes(x=specificity,y=sensitivity,color=cost)) +
+  geom_point(data=opt_df |> filter(model=='s(dn) + s(ds)'),aes(x=specificity,y=sensitivity,color=cost)) +
   theme_bw() +
-  annotate('text',x=0.2,y=0.9,label=paste('auc=',round(auc(df$classification,df$iVDPVness),2),sep=''))
+  annotate('text',x=0.2,y=0.9,label=paste('auc=',round(auc(df$classification,df$cVDPVness),2),sep=''))
 
 p5=ggplot() +
-  stat_ecdf(data=df,aes(x=iVDPVness,color=classification)) +
-  geom_hline(data=opt_df,aes(yintercept = threshold, linetype=cost)) +
+  stat_ecdf(data=df,aes(x=cVDPVness,color=classification)) +
+  geom_hline(data=opt_df|> filter(model=='s(dn) + s(ds)'),aes(yintercept = threshold, linetype=cost)) +
   theme_bw() +
-  guides()
+  guides() +
+  scale_color_manual(values=cmap)
 
-p4+p5
+
+p6 =ggplot(data=df,aes(x=classification,y=log(cVDPVness/(1-cVDPVness)),fill=classification,group=classification)) +
+  geom_violin(scale='width') +
+  geom_quasirandom(varwidth = TRUE,width=0.45,alpha=0.3)+
+  geom_hline(data=opt_df|> filter(model=='s(dn) + s(ds)'),
+             aes(yintercept = log(threshold/(1-threshold)), linetype=cost)) +
+  theme_bw() +
+  scale_fill_manual(values=cmap) +
+  guides() +
+  ylab('logit(cVDPVness)') + xlab('')
+
+p4+p5 +p6
+
+p4.1=ggroc(mod5_roc) + 
+  geom_point(data=opt_df |> filter(model!='s(dn) + s(ds)'),aes(x=specificity,y=sensitivity,color=cost)) +
+  theme_bw() +
+  annotate('text',x=0.2,y=0.9,label=paste('auc=',round(auc(df$classification,df$cVDPVness_years),2),sep=''))
+
+p5.1=ggplot() +
+  stat_ecdf(data=df,aes(x=cVDPVness_years,color=classification)) +
+  geom_hline(data=opt_df|> filter(model!='s(dn) + s(ds)'),aes(yintercept = threshold, linetype=cost)) +
+  theme_bw() +
+  guides()+
+  scale_color_manual(values=cmap)
+
+p6.1 =ggplot(data=df,aes(x=classification,y=log(cVDPVness_years/(1-cVDPVness_years)),fill=classification,group=classification)) +
+  geom_violin(scale='width') +
+  geom_quasirandom(varwidth = TRUE,width=0.45,alpha=0.3)+
+  geom_hline(data=opt_df|> filter(model!='s(dn) + s(ds)'),
+             aes(yintercept = log(threshold/(1-threshold)), linetype=cost)) +
+  theme_bw() +
+  guides() +
+  ylab('logit(cVDPVness)') + xlab('')+
+  scale_fill_manual(values=cmap)
+
+p4.1+p5.1+p6.1
 
 # level sets
 
@@ -266,7 +338,7 @@ p4+p5
                  nrow = length(d_s_range), ncol = length(d_n_range))
   
   # 3) extract level set(s) z = C
-  cl <- contourLines(x = d_s_range, y = d_n_range, z = zmat, levels = opt_df$threshold)
+  cl <- contourLines(x = d_s_range, y = d_n_range, z = zmat, levels = opt_df$threshold[1:2])
   
   # cl is a list of components of the level set; each has $x and $y
   # Example: bind all polylines into one data.frame
@@ -276,17 +348,6 @@ p4+p5
   lev_df$cost = unique(opt_df$cost)[lev_df$comp]
 
 
-p6=ggplot(df,aes(x=d_s,y=d_n)) +
-  geom_jitter(aes(color=classification,fill=classification),width=0.3,height=0.3,alpha=0.2) +
-  geom_line(data =lev_df,aes(linetype = cost)) +
-  # geom_smooth(method='gam') +
-  theme_bw() +
-  ylab('non-synonymous substitutions') +
-  xlab('synonymous substitutions') +
-  scale_x_continuous(breaks=seq(0,300,by=20)) 
-p6
-
-
 p7=ggplot(df,aes(x=d_s,y=d_n)) +
   geom_jitter(aes(color=classification,fill=classification),width=0.3,height=0.3,alpha=0.2) +
   geom_line(data =lev_df,aes(linetype = cost)) +
@@ -294,40 +355,82 @@ p7=ggplot(df,aes(x=d_s,y=d_n)) +
   theme_bw() +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
-  scale_x_continuous(breaks=seq(0,300,by=20)) 
+  scale_x_continuous(breaks=seq(0,300,by=20)) +
+  scale_color_manual(values=cmap)
 p7
 
-(p4 + p5) / p6
-ggsave('classifier.png',units='in',width=12,height=3.5)
 
+
+# fit is your mgcv::gam with z ~ s(x) + s(y)
+
+# 1) grid over the domain
+years_range = seq(0,30,by=0.1)
+d_n_range = seq(0,50,by=1)
+grid <- expand.grid(years = years_range, d_n = d_n_range)
+
+# 2) predict on the desired scale
+#   - use type="response" if C is on the response scale
+#   - if C is on the link scale, use type="link"
+zmat <- matrix(predict(mod5, newdata = grid, type = "response"),
+               nrow = length(years_range), ncol = length(d_n_range))
+
+# 3) extract level set(s) z = C
+cl <- contourLines(x = years_range, y = d_n_range, z = zmat, levels = opt_df$threshold[3:4])
+
+# cl is a list of components of the level set; each has $x and $y
+# Example: bind all polylines into one data.frame
+lev_df_years <- do.call(rbind, lapply(seq_along(cl), function(i)
+  data.frame(comp = i, years = cl[[i]]$x, d_n = cl[[i]]$y)
+))
+lev_df_years$cost = unique(opt_df$cost)[lev_df_years$comp]
+
+
+p8=ggplot(df,aes(x=years,y=d_n)) +
+  geom_jitter(aes(color=classification,fill=classification),width=0.3,height=0.3,alpha=0.2) +
+  geom_line(data =lev_df_years,aes(linetype = cost)) +
+  # geom_smooth(method='gam') +
+  theme_bw() +
+  ylab('non-synonymous substitutions') +
+  xlab('approx. years since OPV') +
+  scale_x_continuous(breaks=seq(0,30,by=5)) +
+  scale_color_manual(values=cmap)
+p8
+
+
+(p4 + p5 + p6) / (p7 + p8)
+ggsave('classifier_dnds.png',units='in',width=12,height=6)
+(p4.1 + p5.1 + p6.1)
+ggsave('classifier_dnyears.png',units='in',width=12,height=3.5)
 
 ## classify vdpvs
-meta_pred = meta |> filter(classification %in% c('cVDPV','iVDPV','VDPV'))
-meta_pred$iVDPVness = predict(mod3,newdata = meta_pred,type='response')
+meta_pred = meta |> filter(classification %in% c('cVDPV','iVDPV','VDPV','SabinLike'))
+meta_pred$cVDPVness = predict(mod3,newdata = meta_pred,type='response')
 
-meta_pred |> group_by(classification) |> summarize(mean(iVDPVness))
+meta_pred |> group_by(classification) |> summarize(mean(cVDPVness))
 
 
 
-p4=ggplot(meta_pred,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
-  geom_jitter(aes(shape=as.character(serotype)),width=0.3,height=0.3,alpha=0.2) +
+p9=ggplot(meta_pred,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
+  geom_jitter(width=0.3,height=0.3,alpha=0.2) +
   # geom_smooth(method='gam') +
   theme_bw() +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
   scale_x_continuous(breaks=seq(0,300,by=20)) +
-  guides(shape=guide_legend('serotype'))
-p4
+  scale_color_manual(values=cmap)
+p9
 
-p5=ggplot(meta_pred,aes(x=d_s,y=d_n,color=iVDPVness,fill=iVDPVness)) +
-  geom_jitter(aes(shape=as.character(serotype)),width=0.3,height=0.3,alpha=0.2) +
+p10=ggplot(meta_pred,aes(x=d_s,y=d_n)) +
+  geom_jitter(aes(color=cVDPVness,fill=cVDPVness),width=0.3,height=0.3,alpha=0.2) +
+  geom_line(data =lev_df,aes(linetype = cost)) +
   # geom_smooth(method='gam') +
   theme_bw() +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
   scale_x_continuous(breaks=seq(0,300,by=20)) +
-  guides(shape=guide_legend('serotype'))
-p5
+  guides(shape=guide_legend('serotype')) +
+  facet_grid('.~classification')
+p10
 
-p3 + p4 + p5 + plot_layout(guides='collect')
-ggsave('iVDPVness.png',units='in',width=18,height=3.5)
+p9 /p10 + plot_layout(guides='collect')
+ggsave('cVDPVness.png',units='in',width=12,height=6)
