@@ -128,8 +128,35 @@ meta = meta |>
 cmap = c("#04e762","#ae7766","#00a1e4","#dc0073","#f5b700")
 names(cmap)=levels(meta$classification)
 
+meta = meta |> mutate(d_n_from_consensus = abs(d_n-3)) |>
+  mutate(relative_fitness = 0.95^(2200/900*d_n_from_consensus))
+
 
 ## plots
+
+ggplot(meta,aes(x=years,fill=classification)) +
+  geom_histogram(binwidth = 0.25,boundary=0) +
+  facet_grid(. ~ classification, scales='free') +
+  xlab('approx. years since OPV') +
+  # scale_x_continuous(breaks=seq(0,30,by=5)) +
+  scale_fill_manual(values=cmap)
+
+ggplot(meta,aes(x=d_n,fill=classification)) +
+  geom_histogram(binwidth = 1,boundary=-0.5) +
+  facet_grid(. ~ classification) +
+  xlab('non-synonymous substitutions') +
+  scale_fill_manual(values=cmap)
+
+ggplot(meta,aes(x=d_s,fill=classification)) +
+  geom_histogram(binwidth = 1,boundary=-0.5) +
+  facet_grid(. ~ classification, scales='free') +
+  # xlim(c(0,20)) +
+  xlab('synonymous substitutions') +
+  scale_fill_manual(values=cmap)
+
+# consider consensus
+summary(glm(d_n ~ d_s + classification, family = 'gaussian',
+           data = meta |> filter(classification %in% c('cVDPV','wild')) |> mutate(d_n = round(d_n), d_s=round(d_s))))
 
 p1=ggplot(meta,aes(x=d_s,y=d_n,color=classification,shape=serotype)) +
   geom_point(alpha=0.2) +
@@ -150,7 +177,7 @@ p2=ggplot(df,
 p2
 
 p3=ggplot(df,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
-  geom_jitter(aes(shape=serotype),width=0.3,height=0.3,alpha=0.2) +
+  geom_point(aes(shape=serotype),alpha=0.2) +
   geom_smooth(method='gam',fill='black',alpha=0.3) +
   ylab('non-synonymous substitutions') +
   xlab('synonymous substitutions') +
@@ -161,6 +188,17 @@ p3
 p2 + p3 + p1
 ggsave('iVDPV_vs_cVDPV.png',units='in',width=12,height=3.5)
 
+sabin_df = data.frame(serotype = c('1','2','3'),
+                      relative_fitness = 2.3/c(14,8,18))
+ggplot(df,aes(x=years,y=relative_fitness,color=classification,fill=classification)) +
+  geom_point(aes(shape=serotype),alpha=0.2) +
+  geom_smooth(method='gam',fill='black',alpha=0.3) +
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  ylab('relative fitness') + 
+  xlab('approx. years since OPV') +
+  ylim(c(0,1)) +
+  # scale_x_continuous(breaks=seq(0,30,by=5)) +
+  scale_color_manual(values=cmap)
 
 # check consistency with Zhao 2017 fig 2  https://www.csbj.org/article/S2001-0370(17)30081-8/fulltext
 # this is comparing slightly different things (distance from sabin vs distance between isolates), 
