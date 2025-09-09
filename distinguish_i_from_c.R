@@ -14,7 +14,7 @@ library(ggbeeswarm)
 
 theme_set(theme_bw()) # Optional: Set a default theme
 
-
+#indel handling?
 # load in and process data by serotype
 for (k in 1:3){
 
@@ -48,17 +48,20 @@ for (k in 1:3){
   df = df |> filter(accession %in% keep$accession)
   
   aln = aln[labels(aln) %in% keep$accession,] 
+  aln_tmp = gap_as_state(as.phyDat(aln))
   
   # translate AA
   aln_aa = as.AAbin(translate(DNAStringSet(apply(as.character(aln), 1, paste0, collapse = "")), 
                               if.fuzzy.codon = "X"))
+  aln_aa_tmp = gap_as_state(as.phyDat(aln_aa))
   
   # counts different from Sabin
   for (CLASS in c('cVDPV','iVDPV','wild', 'SabinLike','VDPV')){
     keep = df |> filter(classification == CLASS | classification=='Sabin') |> select(accession)
     
-    nt_d <- as.matrix(dist.ml(aln[labels(aln) %in% keep$accession,] , model = "F81"))[1,] * gnl
-    aa_d <- as.matrix(dist.ml(aln_aa[labels(aln_aa) %in% keep$accession] , model = "FLU"))[1,]*gnl/3
+    nt_d <- as.matrix(dist.ml(aln_tmp[labels(aln) %in% keep$accession,] , model = "F81"))[1,] * gnl
+    # aa_d <- as.matrix(dist.ml(aln_aa_tmp[labels(aln_aa) %in% keep$accession] , model = "FLU"))[1,]*gnl/3
+    aa_d <- as.matrix(dist.hamming(aln_aa_tmp[labels(aln_aa) %in% keep$accession]))[1,]*gnl/3
     ns_d = (nt_d-aa_d)
     ns_d = ns_d - min(ns_d) # clean up mle slop
     
@@ -128,9 +131,89 @@ meta = meta |>
 cmap = c("#04e762","#ae7766","#00a1e4","#dc0073","#f5b700")
 names(cmap)=levels(meta$classification)
 
-meta = meta |> mutate(d_n_from_consensus = abs(d_n-3)) |>
-  mutate(relative_fitness = 0.95^(2200/900*d_n_from_consensus))
 
+meta |> 
+  filter(classification == 'cVDPV') |>
+  filter(years >=1) |> 
+  summarize(mean_d_n = mean(d_n),
+            median_d_n = median(d_n),
+            harmonic_d_n = 1/(mean(1/d_n)))
+
+
+
+meta |> 
+  filter(classification == 'cVDPV') |>
+  filter(years >=1) |>
+  mutate(d_n = round(d_n)) |>
+  group_by(d_n) |> summarize(n=n()) |> arrange(desc(n))
+
+
+
+
+meta = meta |> mutate(d_n_from_consensus = abs(d_n-3.7)) |>
+  mutate(relative_fitness = 0.95^(2200/900*d_n_from_consensus)) |>
+  mutate(relative_fitness = relative_fitness/mean(relative_fitness[classification=='cVDPV' & years >=1]))
+
+summary(lm(d_n_from_consensus ~ years,
+           data = meta |> filter(years >=1) |> 
+             filter(classification == 'cVDPV'))) 
+
+sabin_df = data.frame(serotype = c('1','2','3'),
+                      relative_fitness = 2.3/c(14,8,18))
+ggplot(meta |> 
+         # dplyr::filter(classification %in% c('cVDPV','iVDPV')) |> ungroup() |> 
+         droplevels(),
+       aes(x=years,y=relative_fitness,color=classification,fill=classification)) +
+  geom_point(aes(shape=serotype),alpha=0.2) +
+  geom_smooth(method='gam',fill='black',alpha=0.3) +
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  ylab('relative fitness') + 
+  xlab('approx. years since OPV') +
+  ylim(c(0,1.2)) +
+  # scale_x_continuous(breaks=seq(0,30,by=5)) +
+  scale_color_manual(values=cmap)
+
+# consider consensus for wild
+tmp=meta |>
+  filter(!(grepl('finland',paper,ignore.case = TRUE) | grepl('2010',paper,ignore.case = TRUE))) |>
+  group_by(classification,serotype) |>
+  summarize(mean_d_n = mean(d_n[years>=0]),
+            mean_d_s = mean(d_s[years>=0]),n=n())
+tmp
+meta = meta |> 
+  left_join(tmp) |>
+  mutate(adjusted_d_n = if_else(classification == 'wild',d_n-(mean_d_n-3.8),d_n),
+                      adjusted_d_s = if_else(classification == 'wild',d_s-(mean_d_s-25.5),d_s))
+  
+summary(wpv_mod <- glm(d_n ~ d_s + classification, family = 'gaussian',
+                       data = meta |> filter(classification %in% c('cVDPV','wild')) |> mutate(d_n = round(d_n), d_s=round(d_s))))
+summary(wpv_mod <- glm(adjusted_d_n ~ adjusted_d_s + classification, family = 'gaussian',
+                       data = meta |> filter(classification %in% c('cVDPV','wild')) |> mutate(d_n = round(d_n), d_s=round(d_s))))
+
+
+meta = meta |> mutate(adjusted_d_n_from_consensus = abs(adjusted_d_n-3.7)) |>
+  mutate(relative_fitness = 0.95^(2200/900*adjusted_d_n_from_consensus)) |>
+  mutate(relative_fitness = relative_fitness/mean(relative_fitness[classification=='cVDPV' & years >=1]))
+
+ggplot(meta |> 
+         # dplyr::filter(classification %in% c('cVDPV','iVDPV')) |> ungroup() |> 
+         droplevels(),
+       aes(x=years,y=relative_fitness,color=classification,fill=classification)) +
+  geom_point(aes(shape=serotype),alpha=0.2) +
+  geom_smooth(method='gam',fill='black',alpha=0.3) +
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  ylab('relative fitness') + 
+  xlab('approx. years since OPV') +
+  ylim(c(0,1.2)) +
+  # scale_x_continuous(breaks=seq(0,30,by=5)) +
+  scale_color_manual(values=cmap)
+
+
+
+# auspice output
+rel_fit = round(meta$relative_fitness,3)
+meta$relative_fitness__colour <- scales::col_numeric(viridisLite::viridis(length(rel_fit)), domain = range(rel_fit, na.rm = TRUE), na.color = NA)(rel_fit)
+write.csv(meta,'processed_metadata.csv',row.names = FALSE)
 
 ## plots
 
@@ -154,9 +237,6 @@ ggplot(meta,aes(x=d_s,fill=classification)) +
   xlab('synonymous substitutions') +
   scale_fill_manual(values=cmap)
 
-# consider consensus
-summary(glm(d_n ~ d_s + classification, family = 'gaussian',
-           data = meta |> filter(classification %in% c('cVDPV','wild')) |> mutate(d_n = round(d_n), d_s=round(d_s))))
 
 p1=ggplot(meta,aes(x=d_s,y=d_n,color=classification,shape=serotype)) +
   geom_point(alpha=0.2) +
@@ -164,6 +244,14 @@ p1=ggplot(meta,aes(x=d_s,y=d_n,color=classification,shape=serotype)) +
   xlab('synonymous substitutions') +
   scale_color_manual(values=cmap)
 p1
+
+p1.5=ggplot(meta,aes(x=adjusted_d_s,y=adjusted_d_n,color=classification,shape=serotype)) +
+  geom_point(alpha=0.2) +
+  ylab('adjusted non-synonymous substitutions') +
+  xlab('synonymous substitutions') +
+  scale_color_manual(values=cmap)
+p1.5
+
 
 df = meta |> dplyr::filter(classification %in% c('cVDPV','iVDPV')) |> ungroup() |> droplevels()
 p2=ggplot(df,
@@ -188,17 +276,7 @@ p3
 p2 + p3 + p1
 ggsave('iVDPV_vs_cVDPV.png',units='in',width=12,height=3.5)
 
-sabin_df = data.frame(serotype = c('1','2','3'),
-                      relative_fitness = 2.3/c(14,8,18))
-ggplot(df,aes(x=years,y=relative_fitness,color=classification,fill=classification)) +
-  geom_point(aes(shape=serotype),alpha=0.2) +
-  geom_smooth(method='gam',fill='black',alpha=0.3) +
-  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
-  ylab('relative fitness') + 
-  xlab('approx. years since OPV') +
-  ylim(c(0,1)) +
-  # scale_x_continuous(breaks=seq(0,30,by=5)) +
-  scale_color_manual(values=cmap)
+
 
 # check consistency with Zhao 2017 fig 2  https://www.csbj.org/article/S2001-0370(17)30081-8/fulltext
 # this is comparing slightly different things (distance from sabin vs distance between isolates), 
@@ -248,10 +326,10 @@ df |> group_by(serotype,classification) |> summarize(n=n())
 
 names(meta)
 
-mod1 = gam(formula = classification ~ d_n + d_s,
+mod1 = gam(formula = classification ~ adjusted_d_n + adjusted_d_s,
            data =df,
            family='binomial')
-mod2 = gam(formula = classification ~ d_n + d_s + serotype,
+mod2 = gam(formula = classification ~ adjusted_d_n + adjusted_d_s + serotype,
            data =df,
            family='binomial')
 summary(mod2)
@@ -260,7 +338,7 @@ summary(mod1)
 plot(mod1)
 
 # nonlinear model is better than linear model
-mod3 = gam(formula = classification ~ s(d_n) + s(d_s),
+mod3 = gam(formula = classification ~ s(adjusted_d_n) + s(adjusted_d_s),
            data =df,
            family='binomial')
 summary(mod3)
@@ -269,7 +347,7 @@ plot(mod3)
 
 
 # interaction model looks pretty overfit
-mod4 = gam(formula = classification ~ ti(d_n,d_s),
+mod4 = gam(formula = classification ~ ti(adjusted_d_n,adjusted_d_s),
            data =df,
            family='binomial')
 summary(mod4)
@@ -277,7 +355,7 @@ c(AIC(mod3),AIC(mod4))
 plot(mod4)
 
 # years instead of d_s is way worse
-mod5 = gam(formula = classification ~ s(d_n) + s(years),
+mod5 = gam(formula = classification ~ s(adjusted_d_n) + s(years),
            data =df,
            family='binomial')
 summary(mod5)
@@ -287,6 +365,9 @@ plot(mod5)
 # mod3=mod1 # wow mod1 is way worse, as one can see looking at the classifier plot p6 below
 df$cVDPVness = predict(mod3,newdata = df,type='response')
 df$cVDPVness_years = predict(mod5,newdata = df,type='response')
+
+meta$cVDPVness = predict(mod3,newdata = meta,type='response')
+meta$cVDPVness_years = predict(mod5,newdata = meta,type='response')
 
 # ROC analysis
 mod3_roc = roc(df$classification,df$cVDPVness)
@@ -367,7 +448,7 @@ p4.1+p5.1+p6.1
   # 1) grid over the domain
   d_s_range = seq(0,140,by=1)
   d_n_range = seq(0,50,by=1)
-  grid <- expand.grid(d_s = d_s_range, d_n = d_n_range)
+  grid <- expand.grid(adjusted_d_s = d_s_range, adjusted_d_n = d_n_range)
   
   # 2) predict on the desired scale
   #   - use type="response" if C is on the response scale
@@ -381,12 +462,12 @@ p4.1+p5.1+p6.1
   # cl is a list of components of the level set; each has $x and $y
   # Example: bind all polylines into one data.frame
   lev_df <- do.call(rbind, lapply(seq_along(cl), function(i)
-    data.frame(comp = i, d_s = cl[[i]]$x, d_n = cl[[i]]$y)
+    data.frame(comp = i, adjusted_d_s = cl[[i]]$x, adjusted_d_n = cl[[i]]$y)
   ))
   lev_df$cost = unique(opt_df$cost)[lev_df$comp]
 
 
-p7=ggplot(df,aes(x=d_s,y=d_n)) +
+p7=ggplot(df,aes(x=adjusted_d_s,y=adjusted_d_n)) +
   geom_jitter(aes(color=classification,fill=classification),width=0.3,height=0.3,alpha=0.2) +
   geom_line(data =lev_df,aes(linetype = cost)) +
   # geom_smooth(method='gam') +
@@ -404,7 +485,7 @@ p7
 # 1) grid over the domain
 years_range = seq(0,30,by=0.1)
 d_n_range = seq(0,50,by=1)
-grid <- expand.grid(years = years_range, d_n = d_n_range)
+grid <- expand.grid(years = years_range, adjusted_d_n = d_n_range)
 
 # 2) predict on the desired scale
 #   - use type="response" if C is on the response scale
@@ -418,12 +499,12 @@ cl <- contourLines(x = years_range, y = d_n_range, z = zmat, levels = opt_df$thr
 # cl is a list of components of the level set; each has $x and $y
 # Example: bind all polylines into one data.frame
 lev_df_years <- do.call(rbind, lapply(seq_along(cl), function(i)
-  data.frame(comp = i, years = cl[[i]]$x, d_n = cl[[i]]$y)
+  data.frame(comp = i, years = cl[[i]]$x, adjusted_d_n = cl[[i]]$y)
 ))
 lev_df_years$cost = unique(opt_df$cost)[lev_df_years$comp]
 
 
-p8=ggplot(df,aes(x=years,y=d_n)) +
+p8=ggplot(df,aes(x=years,y=adjusted_d_n)) +
   geom_jitter(aes(color=classification,fill=classification),width=0.3,height=0.3,alpha=0.2) +
   geom_line(data =lev_df_years,aes(linetype = cost)) +
   # geom_smooth(method='gam') +
@@ -441,14 +522,11 @@ ggsave('classifier_dnds.png',units='in',width=12,height=6)
 ggsave('classifier_dnyears.png',units='in',width=12,height=3.5)
 
 ## classify vdpvs
-meta_pred = meta |> filter(classification %in% c('cVDPV','iVDPV','VDPV','SabinLike'))
-meta_pred$cVDPVness = predict(mod3,newdata = meta_pred,type='response')
-
-meta_pred |> group_by(classification) |> summarize(mean(cVDPVness))
+meta |> group_by(classification) |> summarize(mean(cVDPVness))
 
 
 
-p9=ggplot(meta_pred,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
+p9=ggplot(meta,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
   geom_jitter(width=0.3,height=0.3,alpha=0.2) +
   # geom_smooth(method='gam') +
   theme_bw() +
@@ -458,8 +536,21 @@ p9=ggplot(meta_pred,aes(x=d_s,y=d_n,color=classification,fill=classification)) +
   scale_color_manual(values=cmap)
 p9
 
-p10=ggplot(meta_pred,aes(x=d_s,y=d_n)) +
-  geom_jitter(aes(color=cVDPVness,fill=cVDPVness),width=0.3,height=0.3,alpha=0.2) +
+p9.5=ggplot(meta,aes(x=adjusted_d_s,y=adjusted_d_n,color=classification,fill=classification)) +
+  geom_jitter(width=0.3,height=0.3,alpha=0.2) +
+  # geom_smooth(method='gam') +
+  theme_bw() +
+  ylab('non-synonymous substitutions') +
+  xlab('synonymous substitutions') +
+  scale_x_continuous(breaks=seq(0,300,by=20)) +
+  scale_color_manual(values=cmap)
+p9.5
+
+p10=ggplot(meta,aes(x=adjusted_d_s,y=adjusted_d_n)) +
+  geom_point(aes(color=cVDPVness,fill=cVDPVness),alpha=0.2) +
+  geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') +
+  geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + 
+  geom_point(data=meta |> filter(accession %in% c('FJ842177')), color='magenta') + 
   geom_line(data =lev_df,aes(linetype = cost)) +
   # geom_smooth(method='gam') +
   theme_bw() +
@@ -472,3 +563,121 @@ p10
 
 p9 /p10 + plot_layout(guides='collect')
 ggsave('cVDPVness.png',units='in',width=12,height=6)
+
+
+
+# dig into cVDPVness scores and sources
+
+meta |> filter(classification=='cVDPV') |>
+  group_by(paper) |> 
+  summarize(mean_cVDPVness = mean(cVDPVness)) |> 
+  arrange(desc(mean_cVDPVness)) |> 
+  View()
+
+meta |> filter(classification=='cVDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=cVDPVness,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+meta |> filter(classification=='cVDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=d_n,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+
+meta |> filter(classification=='iVDPV') |>
+  group_by(paper) |> 
+  summarize(mean_cVDPVness = mean(cVDPVness)) |> 
+  arrange(desc(mean_cVDPVness)) |> 
+  View()
+
+meta |> filter(classification=='iVDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=cVDPVness,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+meta |> filter(classification=='iVDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=d_n,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+
+meta |> filter(classification=='VDPV') |>
+  group_by(paper) |> 
+  summarize(mean_cVDPVness = mean(cVDPVness)) |> 
+  arrange(desc(mean_cVDPVness)) |> 
+  View()
+
+meta |> filter(classification=='VDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=cVDPVness,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+meta |> filter(classification=='cVDPV') |>
+  ggplot() +
+  geom_point(aes(x=years,y=d_n,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+
+meta |> filter(classification=='wild') |>
+  group_by(paper) |> 
+  summarize(mean_cVDPVness = mean(cVDPVness)) |> 
+  arrange(desc(mean_cVDPVness)) |> 
+  View()
+
+meta |> filter(classification=='wild') |>
+  ggplot() +
+  geom_point(aes(x=years,y=cVDPVness,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+meta |> filter(classification=='wild') |>
+  ggplot() +
+  geom_point(aes(x=years,y=d_n,color=cVDPVness)) +
+  facet_wrap('paper',labeller = label_wrap_gen(width = 40))
+
+meta |> filter(classification=='wild') |>
+  arrange(cVDPVness) |> select(cVDPVness, accession, paper) |> View()
+
+names(meta)
+p11=ggplot(meta,aes(x=adjusted_d_s,y=relative_fitness)) +
+  geom_point(aes(color=cVDPVness,fill=cVDPVness),alpha=0.2) +
+  geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') + #MOL91-PV1 and BRA85-PV3
+  geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + # AZ59-PV1
+  geom_point(data=meta |> filter(accession %in% c('FJ842177') | grepl('finland',paper,ignore.case = TRUE)), color='magenta') + #Finland
+  geom_point(data=meta |> filter(grepl('the Republic of Congo in 2010',paper,ignore.case = TRUE)), color='orange') + #ROC2010
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  # geom_smooth(method='gam') +
+  theme_bw() +
+  ylab('relative fitness') +
+  xlab('adjusted synonymous substitutions') +
+  scale_x_continuous(breaks=seq(0,300,by=20)) +
+  scale_y_continuous(breaks=seq(0,2,by=0.2)) +
+  guides(shape=guide_legend('serotype')) +
+  facet_grid('.~classification', scale='free_x')
+p11
+
+p12=ggplot(meta,aes(x=adjusted_d_s,y=relative_fitness)) +
+  geom_point(aes(color=serotype,fill=serotype),alpha=0.2) +
+  geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') + #MOL91-PV1 and BRA85-PV3
+  geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + # AZ59-PV1
+  geom_point(data=meta |> filter(accession %in% c('FJ842177') | grepl('finland',paper,ignore.case = TRUE)), color='magenta') + #Finland
+  geom_point(data=meta |> filter(grepl('the Republic of Congo in 2010',paper,ignore.case = TRUE)), color='orange') + #ROC2010
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  # geom_smooth(method='gam') +
+  theme_bw() +
+  ylab('relative fitness') +
+  xlab('adjusted synonymous substitutions') +
+  scale_x_continuous(breaks=seq(0,300,by=20)) +
+  scale_y_continuous(breaks=seq(0,2,by=0.2)) +
+  guides(shape=guide_legend('serotype')) +
+  facet_grid('.~classification', scale='free_x')
+p12
+
+meta |> 
+  # filter( (classification == 'wild' & !grepl('finland',paper, ignore.case = TRUE))) |>
+  filter((classification == 'wild' & !grepl('finland',paper, ignore.case = TRUE)) | (classification == 'cVDPV' & years>=1)) |>
+  filter(relative_fitness>0.5) |>
+  group_by(serotype) |> 
+  summarize(median_fitness = median(relative_fitness),
+            n=n())
+
