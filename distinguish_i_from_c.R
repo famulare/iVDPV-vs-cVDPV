@@ -238,6 +238,15 @@ ggplot(meta,aes(x=d_s,fill=classification)) +
   scale_fill_manual(values=cmap)
 
 
+
+p0=ggplot(meta,aes(x=nt_diff,y=d_n,color=classification,shape=serotype)) +
+  geom_jitter(alpha=0.2,width=0.3,height=0.3) +
+  ylab('non-synonymous substitutions') +
+  xlab('all substitutions') +
+  scale_color_manual(values=cmap) +
+  xlim(c(0,50))
+p0
+
 p1=ggplot(meta,aes(x=d_s,y=d_n,color=classification,shape=serotype)) +
   geom_point(alpha=0.2) +
   ylab('non-synonymous substitutions') +
@@ -639,22 +648,25 @@ meta |> filter(classification=='wild') |>
   arrange(cVDPVness) |> select(cVDPVness, accession, paper) |> View()
 
 names(meta)
-p11=ggplot(meta,aes(x=adjusted_d_s,y=relative_fitness)) +
+p11=ggplot(meta |> filter(classification != 'wild' & classification != 'SabinLike'),
+           aes(x=adjusted_d_s,y=relative_fitness)) +
   geom_point(aes(color=cVDPVness,fill=cVDPVness),alpha=0.2) +
-  geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') + #MOL91-PV1 and BRA85-PV3
-  geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + # AZ59-PV1
-  geom_point(data=meta |> filter(accession %in% c('FJ842177') | grepl('finland',paper,ignore.case = TRUE)), color='magenta') + #Finland
-  geom_point(data=meta |> filter(grepl('the Republic of Congo in 2010',paper,ignore.case = TRUE)), color='orange') + #ROC2010
+  # geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') + #MOL91-PV1 and BRA85-PV3
+  # geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + # AZ59-PV1
+  # geom_point(data=meta |> filter(accession %in% c('FJ842177') | grepl('finland',paper,ignore.case = TRUE)), color='magenta') + #Finland
+  # geom_point(data=meta |> filter(grepl('the Republic of Congo in 2010',paper,ignore.case = TRUE)), color='orange') + #ROC2010
   geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
   # geom_smooth(method='gam') +
   theme_bw() +
   ylab('relative fitness') +
   xlab('adjusted synonymous substitutions') +
   scale_x_continuous(breaks=seq(0,300,by=20)) +
-  scale_y_continuous(breaks=seq(0,2,by=0.2)) +
+  scale_y_continuous(limits=c(0,1.2),breaks=seq(0,2,by=0.2)) +
   guides(shape=guide_legend('serotype')) +
   facet_grid('.~classification', scale='free_x')
 p11
+ggsave('relative_fitness.png',units='in',width=7, height=3.5)
+
 
 p12=ggplot(meta,aes(x=adjusted_d_s,y=relative_fitness)) +
   geom_point(aes(color=serotype,fill=serotype),alpha=0.2) +
@@ -681,3 +693,21 @@ meta |>
   summarize(median_fitness = median(relative_fitness),
             n=n())
 
+
+p13=ggplot(meta |> filter(classification != 'wild' & classification != 'SabinLike'),
+           aes(x=years,y=relative_fitness)) +
+  geom_jitter(aes(color=cVDPVness,fill=cVDPVness),width=0,height=0.02,alpha=0.1) +
+  # geom_point(data=meta |> filter(accession %in% c('AF233112','JN812668')), color='red') + #MOL91-PV1 and BRA85-PV3
+  # geom_point(data=meta |> filter(accession %in% c('AF233098')), color='green') + # AZ59-PV1
+  # geom_point(data=meta |> filter(accession %in% c('FJ842177') | grepl('finland',paper,ignore.case = TRUE)), color='magenta') + #Finland
+  # geom_point(data=meta |> filter(grepl('the Republic of Congo in 2010',paper,ignore.case = TRUE)), color='orange') + #ROC2010
+  geom_hline(data=sabin_df,aes(yintercept = relative_fitness,linetype=serotype)) +
+  # geom_smooth(method='gam') +
+  theme_bw() +
+  ylab('relative fitness') +
+  xlab('approximate years since OPV') +
+  # scale_x_continuous(breaks=seq(0,300,by=20)) +
+  scale_y_continuous(breaks=seq(0,2,by=0.2)) +
+  facet_grid('.~classification', scale='free_x') +
+  guides(linetype=guide_legend('Sabin\nserotype')) 
+p13
