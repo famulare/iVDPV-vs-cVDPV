@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.DS_Store
+.claude/
+.claude.local/
+
+# Excel lock/temp files
+~$*
+~$*.xls
+~$*.xlsx
+
+# Phylogeny tree caches under analysis output dirs (NJ trees built from
+# raw VP1 distances; rebuildable, so not tracked).
+**/output/.cache/
