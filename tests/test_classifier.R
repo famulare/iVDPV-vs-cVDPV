@@ -92,12 +92,19 @@ meta <- readRDS(file.path("analyses", "genbank-classifier", "processed_reference
 tr <- art$training_scores
 
 expected_keys <- c(
-  "mod3", "mod5", "training_scores", "thresholds",
-  "dnds_contours", "dnyears_contours", "color_map",
-  "classifier_color_map", "relative_fitness_norm",
-  "model_comparison", "source_manifest"
+  "mod3", "mod5", "mod_factor_dnds", "mod_independent_dnds",
+  "training_scores", "thresholds", "serotype_thresholds",
+  "dnds_contours", "dnyears_contours", "serotype_dnds_contours",
+  "color_map", "classifier_color_map", "relative_fitness_norm",
+  "model_comparison", "serotype_model_comparison", "source_manifest"
 )
 stopifnot(all(expected_keys %in% names(art)))
+stopifnot(
+  identical(names(art$mod_independent_dnds), c("PV1", "PV2", "PV3")),
+  all(c("cVDPVness", "cVDPVness_factor", "cVDPVness_independent") %in% names(tr)),
+  all(c("pooled", "serotype_factor", "independent_serotype") %in% art$serotype_thresholds$model),
+  all(c("All", "PV1", "PV2", "PV3") %in% art$serotype_thresholds$scope)
+)
 
 # Canonical Sabin-parent wild strains must remain wild (no legacy heuristic corruption)
 wild_parents <- meta |>

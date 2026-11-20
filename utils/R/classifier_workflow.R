@@ -332,24 +332,97 @@ fit_classifier_models <- function(training) {
   mod4 <- gam(classifier_class ~ ti(d_n, d_s), data = training, family = "binomial")
   mod5 <- gam(classifier_class ~ s(d_n) + s(years), data = training, family = "binomial")
 
+  # Serotype-stratified (d_n, d_s) models:
+  #   1. factor_dnds: shared smooths s(d_n) + s(d_s) with virus_type as a factor intercept
+  #   2. independent_dnds: separate s(d_n) + s(d_s) GAM fit independently per serotype
+  mod_factor_dnds <- gam(classifier_class ~ s(d_n) + s(d_s) + virus_type, data = training, family = "binomial")
+
+  serotype_levels <- levels(training$virus_type)
+  mod_independent_dnds <- map(serotype_levels, function(vt) {
+    sub <- training |> filter(virus_type == vt)
+    k_dn <- max(3L, min(10L, n_distinct(sub$d_n) - 1L))
+    k_ds <- max(3L, min(10L, n_distinct(sub$d_s) - 1L))
+    gam(classifier_class ~ s(d_n, k = k_dn) + s(d_s, k = k_ds), data = sub, family = "binomial")
+  }) |>
+    set_names(serotype_levels)
+
+  ind_loglik <- sum(vapply(mod_independent_dnds, function(m) as.numeric(logLik(m)), numeric(1L)))
+  ind_edf <- sum(vapply(mod_independent_dnds, function(m) attr(logLik(m), "df"), numeric(1L)))
+  ind_aic <- sum(vapply(mod_independent_dnds, AIC, numeric(1L)))
+
+  serotype_comparison <- bind_rows(
+    tibble(
+      model = c(
+        "pooled: s(d_n) + s(d_s)",
+        "serotype_factor: s(d_n) + s(d_s) + virus_type",
+        "independent_serotype: sum(PV1 + PV2 + PV3)"
+      ),
+      scope = "All",
+      n = nrow(training),
+      n_iVDPV = sum(training$classifier_class == "iVDPV"),
+      n_cVDPV = sum(training$classifier_class == "cVDPV"),
+      edf = c(attr(logLik(mod3), "df"), attr(logLik(mod_factor_dnds), "df"), ind_edf),
+      logLik = c(as.numeric(logLik(mod3)), as.numeric(logLik(mod_factor_dnds)), ind_loglik),
+      aic = c(AIC(mod3), AIC(mod_factor_dnds), ind_aic)
+    ),
+    map_dfr(serotype_levels, function(vt) {
+      m <- mod_independent_dnds[[vt]]
+      sub <- training |> filter(virus_type == vt)
+      tibble(
+        model = paste0("independent_", vt, ": s(d_n) + s(d_s)"),
+        scope = vt,
+        n = nrow(sub),
+        n_iVDPV = sum(sub$classifier_class == "iVDPV"),
+        n_cVDPV = sum(sub$classifier_class == "cVDPV"),
+        edf = attr(logLik(m), "df"),
+        logLik = as.numeric(logLik(m)),
+        aic = AIC(m)
+      )
+    })
+  )
+
   list(
     linear = mod1,
     linear_serotype = mod2,
     dnds = mod3,
     interaction = mod4,
     dnyears = mod5,
+    factor_dnds = mod_factor_dnds,
+    independent_dnds = mod_independent_dnds,
     model_comparison = tibble(
-      model = c("linear d_n+d_s", "linear + virus_type", "smooth d_n+d_s", "tensor interaction", "smooth d_n+years"),
-      aic = c(AIC(mod1), AIC(mod2), AIC(mod3), AIC(mod4), AIC(mod5))
-    )
+      model = c(
+        "linear d_n+d_s",
+        "linear + virus_type",
+        "smooth d_n+d_s (pooled)",
+        "tensor interaction",
+        "smooth d_n+years",
+        "smooth d_n+d_s + virus_type (factor)",
+        "smooth d_n+d_s independent by virus_type"
+      ),
+      aic = c(AIC(mod1), AIC(mod2), AIC(mod3), AIC(mod4), AIC(mod5), AIC(mod_factor_dnds), ind_aic)
+    ),
+    serotype_model_comparison = serotype_comparison
   )
+}
+
+predict_independent_serotype <- function(ind_models, newdata) {
+  out <- rep(NA_real_, nrow(newdata))
+  for (vt in names(ind_models)) {
+    idx <- which(as.character(newdata$virus_type) == vt)
+    if (length(idx) > 0L) {
+      out[idx] <- as.numeric(predict(ind_models[[vt]], newdata = newdata[idx, , drop = FALSE], type = "response"))
+    }
+  }
+  out
 }
 
 score_training_data <- function(training, models) {
   training |>
     mutate(
       cVDPVness = as.numeric(predict(models$dnds, newdata = training, type = "response")),
-      cVDPVness_years = as.numeric(predict(models$dnyears, newdata = training, type = "response"))
+      cVDPVness_years = as.numeric(predict(models$dnyears, newdata = training, type = "response")),
+      cVDPVness_factor = as.numeric(predict(models$factor_dnds, newdata = training, type = "response")),
+      cVDPVness_independent = predict_independent_serotype(models$independent_dnds, training)
     )
 }
 
@@ -394,15 +467,20 @@ contour_table <- function(model, grid, x_col, y_col, levels, costs) {
     nrow = length(x_values),
     ncol = length(y_values)
   )
-  contours <- contourLines(x = x_values, y = y_values, z = zmat, levels = levels)
 
-  map_dfr(seq_along(contours), function(i) {
-    tibble(
-      comp = i,
-      !!x_col := contours[[i]]$x,
-      !!y_col := contours[[i]]$y,
-      cost = costs[which.min(abs(levels - contours[[i]]$level))]
-    )
+  comp_id <- 0L
+  map2_dfr(levels, costs, function(lvl, cst) {
+    contours <- contourLines(x = x_values, y = y_values, z = zmat, levels = lvl)
+    if (length(contours) == 0L) return(tibble())
+    map_dfr(seq_along(contours), function(i) {
+      comp_id <<- comp_id + 1L
+      tibble(
+        comp = comp_id,
+        !!x_col := contours[[i]]$x,
+        !!y_col := contours[[i]]$y,
+        cost = cst
+      )
+    })
   })
 }
 
@@ -490,7 +568,7 @@ plot_classifier_diagnostics <- function(scored_training, thresholds, surfaces, c
 
   p_surface_dnds <- ggplot(scored_training, aes(x = d_s, y = d_n)) +
     geom_jitter(aes(color = poliovirus_classification), width = 0.3, height = 0.3, alpha = 0.25) +
-    geom_line(data = surfaces$dnds_contours, aes(group = interaction(comp, cost), linetype = cost)) +
+    geom_path(data = surfaces$dnds_contours, aes(group = interaction(comp, cost), linetype = cost)) +
     theme_bw() +
     ylab("non-synonymous codon differences") +
     xlab("synonymous codon differences") +
@@ -500,7 +578,7 @@ plot_classifier_diagnostics <- function(scored_training, thresholds, surfaces, c
 
   p_surface_years <- ggplot(scored_training, aes(x = years, y = d_n)) +
     geom_jitter(aes(color = poliovirus_classification), width = 0.2, height = 0.3, alpha = 0.25) +
-    geom_line(data = surfaces$dnyears_contours, aes(group = interaction(comp, cost), linetype = cost)) +
+    geom_path(data = surfaces$dnyears_contours, aes(group = interaction(comp, cost), linetype = cost)) +
     theme_bw() +
     ylab("non-synonymous codon differences") +
     xlab("approx. years since OPV") +
@@ -571,7 +649,7 @@ plot_cvdpvness_projection <- function(meta, model, dnds_contours, config) {
 
   p_score <- ggplot(meta_pred, aes(x = d_s, y = d_n)) +
     geom_jitter(aes(color = cVDPVness), width = 0.3, height = 0.3, alpha = 0.3) +
-    geom_line(data = dnds_contours, aes(group = interaction(comp, cost), linetype = cost)) +
+    geom_path(data = dnds_contours, aes(group = interaction(comp, cost), linetype = cost)) +
     theme_bw() +
     ylab("non-synonymous codon differences") +
     xlab("synonymous codon differences") +
@@ -596,7 +674,220 @@ relative_fitness_normalization <- function(meta, config) {
   c(rf, list(cVDPV_mean = cVDPV_mean))
 }
 
-write_classifier_outputs <- function(meta, training, thresholds, surfaces, models, config) {
+serotype_stratified_thresholds <- function(scored_training) {
+  specs <- tribble(
+    ~model,                  ~pred_col,
+    "pooled",                "cVDPVness",
+    "serotype_factor",       "cVDPVness_factor",
+    "independent_serotype",  "cVDPVness_independent"
+  )
+
+  eval_one <- function(df, pred_col, model_label, scope_label) {
+    r <- roc(
+      response = df$classifier_class,
+      predictor = df[[pred_col]],
+      levels = c("iVDPV", "cVDPV"),
+      direction = "<",
+      quiet = TRUE
+    )
+    pick_one <- function(x) as_tibble(x)[1L, , drop = FALSE]
+    y <- pick_one(coords(r, "best", best.method = "youden"))
+    w <- pick_one(coords(r, "best", best.method = "youden", best.weights = c(10, 0.5)))
+
+    tibble(
+      model = model_label,
+      scope = scope_label,
+      n_iVDPV = sum(df$classifier_class == "iVDPV"),
+      n_cVDPV = sum(df$classifier_class == "cVDPV"),
+      auc = as.numeric(auc(r)),
+      cost = c("equal", "c/i = 10x"),
+      threshold = c(y$threshold, w$threshold),
+      specificity = c(y$specificity, w$specificity),
+      sensitivity = c(y$sensitivity, w$sensitivity)
+    )
+  }
+
+  scopes <- c("All", levels(scored_training$virus_type))
+  map_dfr(scopes, function(sc) {
+    sub <- if (sc == "All") scored_training else scored_training |> filter(virus_type == sc)
+    pmap_dfr(specs, function(model, pred_col) eval_one(sub, pred_col, model, sc))
+  })
+}
+
+build_serotype_stratified_surfaces <- function(models, stratified_thresholds, training) {
+  max_ds <- max(140, ceiling(max(training$d_s, na.rm = TRUE) / 10) * 10 + 10)
+  max_dn <- max(50, ceiling(max(training$d_n, na.rm = TRUE) / 5) * 5 + 5)
+  serotypes <- levels(training$virus_type)
+
+  # Evaluate contours for each serotype and each model under both per-serotype
+  # and global ("All") ROC thresholds.
+  map_dfr(serotypes, function(vt) {
+    grid <- expand.grid(d_s = seq(0, max_ds, by = 1), d_n = seq(0, max_dn, by = 1)) |>
+      mutate(virus_type = factor(vt, levels = serotypes))
+    x_values <- sort(unique(grid$d_s))
+    y_values <- sort(unique(grid$d_n))
+
+    pred_list <- list(
+      pooled = as.numeric(predict(models$dnds, newdata = grid, type = "response")),
+      serotype_factor = as.numeric(predict(models$factor_dnds, newdata = grid, type = "response")),
+      independent_serotype = as.numeric(predict(models$independent_dnds[[vt]], newdata = grid, type = "response"))
+    )
+
+    map_dfr(names(pred_list), function(m_name) {
+      zmat <- matrix(pred_list[[m_name]], nrow = length(x_values), ncol = length(y_values))
+      map_dfr(c("per_serotype", "global"), function(t_scope) {
+        sc_key <- if (t_scope == "per_serotype") vt else "All"
+        t_rows <- stratified_thresholds |> filter(model == m_name, scope == sc_key)
+        comp_id <- 0L
+        map2_dfr(t_rows$threshold, t_rows$cost, function(lvl, cst) {
+          contours <- contourLines(x = x_values, y = y_values, z = zmat, levels = lvl)
+          if (length(contours) == 0L) return(tibble())
+          map_dfr(seq_along(contours), function(i) {
+            comp_id <<- comp_id + 1L
+            tibble(
+              virus_type = factor(vt, levels = serotypes),
+              model = m_name,
+              threshold_scope = t_scope,
+              comp = comp_id,
+              d_s = contours[[i]]$x,
+              d_n = contours[[i]]$y,
+              cost = cst
+            )
+          })
+        })
+      })
+    })
+  })
+}
+
+plot_serotype_stratified_diagnostics <- function(scored_training, stratified_thresholds, stratified_contours, config) {
+  colors <- config$color_map
+  model_colors <- c(
+    pooled = "#555555",
+    serotype_factor = "#e66101",
+    independent_serotype = "#5e3c99"
+  )
+  model_labels <- c(
+    pooled = "Pooled: s(dn)+s(ds)",
+    serotype_factor = "Factor: s(dn)+s(ds)+type",
+    independent_serotype = "Independent per type"
+  )
+
+  # 1. Decision contours per serotype (using per-serotype calibrated thresholds)
+  contours_per_st <- stratified_contours |>
+    filter(threshold_scope == "per_serotype") |>
+    mutate(model = factor(model, levels = names(model_colors)))
+
+  p_surfaces <- ggplot(scored_training, aes(x = d_s, y = d_n)) +
+    geom_jitter(aes(color = poliovirus_classification), width = 0.3, height = 0.3, alpha = 0.3) +
+    geom_path(
+      data = contours_per_st,
+      aes(
+        group = interaction(model, comp, cost),
+        color = model,
+        linetype = cost
+      ),
+      linewidth = 0.7
+    ) +
+    facet_grid(. ~ virus_type) +
+    theme_bw() +
+    ylab("non-synonymous codon differences") +
+    xlab("synonymous codon differences") +
+    coord_cartesian(xlim = c(0, 120), ylim = c(0, 32)) +
+    scale_x_continuous(breaks = seq(0, 120, by = 20)) +
+    scale_color_manual(
+      values = c(colors, model_colors),
+      breaks = c(names(model_colors), "iVDPV", "cVDPV", "cVDPV-n"),
+      labels = c(unname(model_labels), "iVDPV", "cVDPV", "cVDPV-n"),
+      name = "model / class"
+    ) +
+    guides(
+      color = guide_legend(override.aes = list(alpha = 1)),
+      linetype = guide_legend(title = "cost")
+    )
+
+  # 2. Per-serotype ROC curves comparing the 3 models
+  serotypes <- levels(scored_training$virus_type)
+  roc_curve_df <- map_dfr(serotypes, function(vt) {
+    sub <- scored_training |> filter(virus_type == vt)
+    specs <- list(
+      pooled = sub$cVDPVness,
+      serotype_factor = sub$cVDPVness_factor,
+      independent_serotype = sub$cVDPVness_independent
+    )
+    map_dfr(names(specs), function(m_name) {
+      r <- roc(sub$classifier_class, specs[[m_name]], levels = c("iVDPV", "cVDPV"), direction = "<", quiet = TRUE)
+      tibble(
+        virus_type = factor(vt, levels = serotypes),
+        model = factor(m_name, levels = names(model_colors)),
+        specificity = r$specificities,
+        sensitivity = r$sensitivities
+      ) |>
+        arrange(desc(specificity), sensitivity)
+    })
+  })
+
+  auc_labels <- stratified_thresholds |>
+    filter(scope != "All", cost == "equal") |>
+    mutate(
+      virus_type = factor(scope, levels = serotypes),
+      model = factor(model, levels = names(model_colors)),
+      label = sprintf("%s: AUC = %.3f", model_labels[as.character(model)], auc),
+      x = 0.03,
+      y = case_when(
+        model == "pooled" ~ 0.28,
+        model == "serotype_factor" ~ 0.18,
+        TRUE ~ 0.08
+      )
+    )
+
+  p_rocs <- ggplot(roc_curve_df, aes(x = specificity, y = sensitivity, color = model)) +
+    geom_path(linewidth = 0.8) +
+    geom_text(
+      data = auc_labels,
+      aes(x = x, y = y, label = label, color = model),
+      hjust = 1, size = 2.9, show.legend = FALSE
+    ) +
+    scale_x_reverse(limits = c(1, 0)) +
+    facet_grid(. ~ virus_type) +
+    theme_bw() +
+    scale_color_manual(values = model_colors, guide = "none") +
+    xlab("specificity") +
+    ylab("sensitivity")
+
+  # 3. Per-serotype logit(cVDPVness) distributions across the 3 models
+  logit_long <- scored_training |>
+    select(accession, virus_type, classifier_class, poliovirus_classification,
+           pooled = cVDPVness, serotype_factor = cVDPVness_factor, independent_serotype = cVDPVness_independent) |>
+    pivot_longer(
+      cols = c(pooled, serotype_factor, independent_serotype),
+      names_to = "model",
+      values_to = "score"
+    ) |>
+    mutate(
+      model = factor(model, levels = names(model_colors), labels = unname(model_labels)),
+      logit_score = safe_logit(score)
+    )
+
+  p_logits <- ggplot(logit_long, aes(x = classifier_class, y = logit_score, fill = classifier_class)) +
+    geom_violin(scale = "width", alpha = 0.4) +
+    geom_quasirandom(aes(color = poliovirus_classification), varwidth = TRUE, width = 0.4, alpha = 0.4, size = 1.1) +
+    facet_grid(model ~ virus_type, scales = "free_y") +
+    theme_bw() +
+    scale_fill_manual(values = config$classifier_color_map, guide = "none") +
+    scale_color_manual(values = colors, guide = "none") +
+    ylab("logit(cVDPVness)") +
+    xlab("")
+
+  ggsave(
+    file.path(config$project_dir, config$output_dir, "classifier_serotype_dnds.png"),
+    p_surfaces / p_rocs / p_logits + plot_layout(heights = c(1.1, 1.0, 1.8), guides = "collect"),
+    units = "in", width = 13.5, height = 11
+  )
+}
+
+write_classifier_outputs <- function(meta, training, thresholds, surfaces, models,
+                                     stratified_thresholds, stratified_contours, config) {
   out_dir <- file.path(config$project_dir, config$output_dir)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   norm <- relative_fitness_normalization(meta, config)
@@ -605,14 +896,19 @@ write_classifier_outputs <- function(meta, training, thresholds, surfaces, model
   artifacts <- list(
     mod3 = models$dnds,
     mod5 = models$dnyears,
+    mod_factor_dnds = models$factor_dnds,
+    mod_independent_dnds = models$independent_dnds,
     training_scores = training,
     thresholds = thresholds,
+    serotype_thresholds = stratified_thresholds,
     dnds_contours = surfaces$dnds_contours,
     dnyears_contours = surfaces$dnyears_contours,
+    serotype_dnds_contours = stratified_contours,
     color_map = config$color_map,
     classifier_color_map = config$classifier_color_map,
     relative_fitness_norm = norm,
     model_comparison = models$model_comparison,
+    serotype_model_comparison = models$serotype_model_comparison,
     source_manifest = source_manifest
   )
 
@@ -621,8 +917,11 @@ write_classifier_outputs <- function(meta, training, thresholds, surfaces, model
   write.csv(meta, file.path(out_dir, "processed_reference_meta.csv"), row.names = FALSE)
   write.csv(training, file.path(out_dir, "classifier_training_scores.csv"), row.names = FALSE)
   write.csv(thresholds, file.path(out_dir, "classifier_thresholds.csv"), row.names = FALSE)
+  write.csv(stratified_thresholds, file.path(out_dir, "classifier_serotype_thresholds.csv"), row.names = FALSE)
+  write.csv(models$serotype_model_comparison, file.path(out_dir, "classifier_serotype_model_comparison.csv"), row.names = FALSE)
   write.csv(surfaces$dnds_contours, file.path(out_dir, "classifier_dnds_contours.csv"), row.names = FALSE)
   write.csv(surfaces$dnyears_contours, file.path(out_dir, "classifier_dnyears_contours.csv"), row.names = FALSE)
+  write.csv(stratified_contours, file.path(out_dir, "classifier_serotype_dnds_contours.csv"), row.names = FALSE)
   write.csv(
     data.frame(poliovirus_classification = names(config$color_map), color = unname(config$color_map)),
     file.path(out_dir, "classifier_color_map.csv"),
@@ -653,9 +952,25 @@ run_classifier_workflow <- function(config = classifier_config()) {
   thresholds <- classifier_thresholds(scored_training)
   surfaces <- build_classifier_surfaces(models, thresholds, scored_training)
 
+  stratified_thresholds <- serotype_stratified_thresholds(scored_training)
+  stratified_contours <- build_serotype_stratified_surfaces(models, stratified_thresholds, scored_training)
+
   plot_classifier_diagnostics(scored_training, thresholds, surfaces, config)
   plot_cvdpvness_projection(meta, models$dnds, surfaces$dnds_contours, config)
+  plot_serotype_stratified_diagnostics(scored_training, stratified_thresholds, stratified_contours, config)
 
-  artifacts <- write_classifier_outputs(meta, scored_training, thresholds, surfaces, models, config)
-  invisible(list(meta = meta, training = scored_training, models = models, thresholds = thresholds, surfaces = surfaces, artifacts = artifacts))
+  artifacts <- write_classifier_outputs(
+    meta, scored_training, thresholds, surfaces, models,
+    stratified_thresholds, stratified_contours, config
+  )
+  invisible(list(
+    meta = meta,
+    training = scored_training,
+    models = models,
+    thresholds = thresholds,
+    serotype_thresholds = stratified_thresholds,
+    surfaces = surfaces,
+    serotype_contours = stratified_contours,
+    artifacts = artifacts
+  ))
 }
