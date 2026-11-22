@@ -1,43 +1,43 @@
 {
   "alignments": {
     "PV1": {
-      "extracted_rows": 3506,
+      "extracted_rows": 3591,
       "reference_accession": "AY184219",
-      "skipped_below_min_vp1_nt": 818,
-      "skipped_engineered": 9,
+      "skipped_below_min_vp1_nt": 822,
+      "skipped_engineered": 12,
       "skipped_missing_meta": 0,
       "source_alignment": "final/alignments/PV1_unified_aln.fasta.gz",
-      "upstream_fasta_sha256": "539bfe0866d07dac5d9cf809ce4f46276a563aefaeb4be01e1b8e39649ba50ef",
-      "upstream_population_sha256": "db040d201ee1b383635e6d9eefc23df007dd07ace13ba68550a97bfa24ca3bbb",
-      "upstream_rows": 4333,
+      "upstream_fasta_sha256": "bbb80a60612e0ccd762093285d267f6f12d13d4e8cd6bc2f208e2434549e6ad7",
+      "upstream_population_sha256": "c1ab4cecb423938b4fe4a2aead5dcd61ed71bb5471b7594346425cccf930c0db",
+      "upstream_rows": 4425,
       "vp1_end_1based": 3385,
       "vp1_length_nt": 906,
       "vp1_start_1based": 2480
     },
     "PV2": {
-      "extracted_rows": 3394,
+      "extracted_rows": 3538,
       "reference_accession": "AY184220",
-      "skipped_below_min_vp1_nt": 388,
+      "skipped_below_min_vp1_nt": 389,
       "skipped_engineered": 9,
       "skipped_missing_meta": 0,
       "source_alignment": "final/alignments/PV2_unified_aln.fasta.gz",
-      "upstream_fasta_sha256": "d447ed57226d9a462100afab33c7bee4aa6d8eb180e4c744ca7a75439db02034",
-      "upstream_population_sha256": "ffac130e3c24dba70d1daab58a4541f66f322e4be3159bc89029cdea1bd1b3d1",
-      "upstream_rows": 3791,
+      "upstream_fasta_sha256": "672e53c37f908b2df2ca1d4b3660ce69dd4ece1240be9c5d34a19e5c82900816",
+      "upstream_population_sha256": "2e6549f2ef449631609a05593529aeb6276a379899fdc579ccf9ae80c96054c9",
+      "upstream_rows": 3936,
       "vp1_end_1based": 3384,
       "vp1_length_nt": 903,
       "vp1_start_1based": 2482
     },
     "PV3": {
-      "extracted_rows": 1333,
+      "extracted_rows": 1416,
       "reference_accession": "AY184221",
-      "skipped_below_min_vp1_nt": 258,
-      "skipped_engineered": 6,
+      "skipped_below_min_vp1_nt": 260,
+      "skipped_engineered": 8,
       "skipped_missing_meta": 0,
       "source_alignment": "final/alignments/PV3_unified_aln.fasta.gz",
-      "upstream_fasta_sha256": "d64f4da49ab7d8481a939d9824dbbdfd2ff0a11f16cbaf5cde344c0074cbdc30",
-      "upstream_population_sha256": "9461cb866765cc4fa1df030402f04bb8825a4ad540f436e740d93f719faa64e3",
-      "upstream_rows": 1597,
+      "upstream_fasta_sha256": "e5fcb5d6efd54f2ef9e8845b7dc4ef2da79b5b6ce88402048ee91f989c390886",
+      "upstream_population_sha256": "ebe2da03955a79fc04989f993a5357ae518861aeb9a488c4b0d3b4eb40a87406",
+      "upstream_rows": 1684,
       "vp1_end_1based": 3376,
       "vp1_length_nt": 900,
       "vp1_start_1based": 2477
@@ -50,32 +50,33 @@
     "min_vp1_nt": 1
   },
   "outputs_sha256": {
-    "PV1_vp1.fasta.gz": "b918c1d8043fb9a8a09bf023b5b702644609fd1752bb48085f950935fa3edb46",
-    "PV2_vp1.fasta.gz": "049ff30ed5b59e6bc745fb83cf6707f6e055d712cffed8a4516478b34b8039b1",
-    "PV3_vp1.fasta.gz": "f00099f958dca89d0a5595be5ab14378d57457384a5f0a25770316189653f3d7",
-    "poliovirus_vp1_metadata.tsv.gz": "48b59bbd18c4220a0d5f6c62101b7e8dd1da688c72d78d3634947cbe95636275"
+    "PV1_vp1.fasta.gz": "a8ed3a7af7df2ce604f3da696dd38e5a6cc8a5e20fe2c6771c08ef60ed4d6dc2",
+    "PV2_vp1.fasta.gz": "03dea41d122ec1eb12f90ead8450b65e819520b7e33b2b362226d168a6876e01",
+    "PV3_vp1.fasta.gz": "6b8ade3c07db29468a2fec74f5ad581a13c0896f37eed2367a5137dc24015252",
+    "poliovirus_vp1_metadata.tsv.gz": "02b5393f35f0686ecb555b29102effd213fbdc8eb27f2d0c856c6aa09d53c66e"
   },
-  "release_version": "5.3.0",
+  "release_version": "5.4.0",
   "schema_version": "2.4.1",
   "source_dataset": "enterovirus-genbank-curated",
   "source_files": {
-    "build_manifest.json": "523358af87044869d6db164f81ca2250552ad74111f1f7f0d3e2838dacdf8e24",
+    "build_manifest.json": "ff43a48293851dff8f2251e69bcc0f0eab10e97a371d92661d16d0be13b315ff",
     "reference_region_coordinates.tsv": "41420f9e5a5d3804f6370c0b41fa487365e5dc0a85e1f85c191082f15f9551e1",
-    "sequence_metadata_vouched.tsv.gz": "34c7d683884085fc46703d0463be576c7bd5a31a8e8cd044fd02152610156eb4"
+    "sequence_metadata_vouched.tsv.gz": "c822afc1082910339e6eb0cefb7e161f2a407e2199b5a77d22eb4728937b0212"
   },
   "summary": {
     "PV1": {
       "cov_ge_95_by_class": {
-        "<blank>": 1,
-        "Sabin": 4,
-        "Sabin-like": 924,
-        "VDPV": 20,
+        "<blank>": 4,
+        "Sabin": 7,
+        "Sabin-like": 980,
+        "VDPV": 21,
         "cVDPV": 291,
         "chimera": 2,
+        "engineered/lab": 1,
         "iVDPV": 50,
         "nOPV": 1,
         "vaccine": 4,
-        "wild": 1802
+        "wild": 1816
       },
       "cov_ge_95_with_internal_del_by_class": {
         "Sabin-like": 1,
@@ -83,59 +84,61 @@
         "chimera": 2,
         "wild": 3
       },
-      "extracted_total": 3506,
+      "extracted_total": 3591,
       "frameshift_by_class": {}
     },
     "PV2": {
       "cov_ge_95_by_class": {
-        "Sabin": 3,
-        "Sabin-like": 1517,
-        "VDPV": 547,
+        "<blank>": 4,
+        "Sabin": 5,
+        "Sabin-like": 1541,
+        "VDPV": 552,
         "VDPV-n": 2,
-        "cVDPV": 1057,
+        "cVDPV": 1158,
         "cVDPV-n": 25,
+        "engineered/lab": 1,
         "iVDPV": 71,
         "nOPV": 1,
         "nOPV-L": 28,
         "vaccine": 1,
-        "wild": 32
+        "wild": 35
       },
       "cov_ge_95_with_internal_del_by_class": {
         "VDPV": 9,
         "cVDPV": 4,
         "iVDPV": 4
       },
-      "extracted_total": 3394,
+      "extracted_total": 3538,
       "frameshift_by_class": {}
     },
     "PV3": {
       "cov_ge_95_by_class": {
-        "<blank>": 1,
-        "Sabin": 5,
-        "Sabin-like": 845,
-        "VDPV": 64,
-        "cVDPV": 9,
+        "<blank>": 4,
+        "Sabin": 7,
+        "Sabin-like": 869,
+        "VDPV": 66,
+        "cVDPV": 54,
         "chimera": 2,
         "iVDPV": 58,
         "nOPV": 1,
         "vaccine": 3,
-        "wild": 194
+        "wild": 196
       },
       "cov_ge_95_with_internal_del_by_class": {
         "chimera": 1
       },
-      "extracted_total": 1333,
+      "extracted_total": 1416,
       "frameshift_by_class": {
         "<blank>": 1
       }
     }
   },
-  "upstream_code_sha256": "4570f0ab68fbb63c8f68c7e6932ef2ff228a7fdfd5c636d91e3d2478e427e806",
+  "upstream_code_sha256": "a03b177a667bff8ecf3995a1600c084a7cbf6f20e49a132d7759535733b53870",
   "upstream_inputs": {
-    "decisions_sha256": "09b72757df65d877f3970824f5d5f1d42ceebae256176eaddd353378357a225f",
+    "decisions_sha256": "c8b3ccb8e232598151928e30f816c49cc48514c39ffbe36767e6a01bf878e4ab",
     "raw_archive_sha256": "96848ce1c275359e25736beb21831acbfccb1b503d3b718cf131eca741abc609",
     "raw_record_count": 25727,
     "raw_uncompressed_sha256": "d72e8e4dad2b0a1b1953bc827397b917c9ca8a50542f637dc83ce046a5fed2f3",
-    "rules_sha256": "a40dc867418d64cb51611829a21706fecbb0607935acf55094533c12bbee992f"
+    "rules_sha256": "71b9423ce508b9ac0091ec89cda70cf7ed582de83159cdea0bcd1b227376ee9f"
   }
 }
